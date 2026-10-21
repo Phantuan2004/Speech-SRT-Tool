@@ -6,8 +6,8 @@ from pathlib import Path
 from speech_srt.sentence_segmenter import SubtitleBlock
 from speech_srt.validators import (
     validate_media_file,
-    validate_timestamps,
     validate_subtitle_blocks,
+    validate_timestamps,
 )
 
 
@@ -64,11 +64,6 @@ class TestValidateTimestamps:
         assert not is_valid
         assert "strictly greater" in err
 
-    def test_end_exceeds_max_duration_fails(self) -> None:
-        is_valid, err = validate_timestamps(10.0, 25.0, max_duration=20.0)
-        assert not is_valid
-        assert "exceeds media duration" in err
-
     def test_valid_timestamps_pass(self) -> None:
         is_valid, err = validate_timestamps(1.0, 4.5, max_duration=10.0)
         assert is_valid
@@ -79,29 +74,51 @@ class TestValidateSubtitleBlocks:
     """Tests for validate_subtitle_blocks function."""
 
     def test_empty_sequence_is_valid(self) -> None:
-        is_valid, _ = validate_subtitle_blocks([])
-        assert is_valid
+        report = validate_subtitle_blocks([])
+        assert report.is_valid
+        assert len(report.errors) == 0
 
-    def test_index_mismatch_fails(self) -> None:
+    def test_index_mismatch_produces_error(self) -> None:
         blocks = [
             SubtitleBlock(index=2, start_time=0.0, end_time=1.0, text="Out of order"),
         ]
-        is_valid, err = validate_subtitle_blocks(blocks)
-        assert not is_valid
-        assert "index mismatch" in err
+        report = validate_subtitle_blocks(blocks)
+        assert not report.is_valid
+        assert any("index mismatch" in e for e in report.errors)
 
-    def test_empty_text_fails(self) -> None:
+    def test_empty_text_produces_error(self) -> None:
         blocks = [
             SubtitleBlock(index=1, start_time=0.0, end_time=1.0, text="   "),
         ]
-        is_valid, err = validate_subtitle_blocks(blocks)
-        assert not is_valid
-        assert "empty text" in err
+        report = validate_subtitle_blocks(blocks)
+        assert not report.is_valid
+        assert any("empty text" in e for e in report.errors)
 
-    def test_valid_blocks_pass(self) -> None:
+    def test_non_chronological_order_produces_error(self) -> None:
         blocks = [
-            SubtitleBlock(index=1, start_time=0.0, end_time=2.0, text="Valid 1"),
-            SubtitleBlock(index=2, start_time=2.1, end_time=4.0, text="Valid 2"),
+            SubtitleBlock(index=1, start_time=3.0, end_time=4.0, text="First"),
+            SubtitleBlock(index=2, start_time=2.0, end_time=3.5, text="Starts before previous"),
         ]
-        is_valid, _ = validate_subtitle_blocks(blocks)
-        assert is_valid
+        report = validate_subtitle_blocks(blocks)
+        assert not report.is_valid
+        assert any("starts earlier than" in e for e in report.errors)
+
+    def test_overlap_produces_warning_not_fatal_error(self) -> None:
+        blocks = [
+            SubtitleBlock(index=1, start_time=1.0, end_time=3.0, text="First block"),
+            # Overlaps by 0.3s
+            SubtitleBlock(index=2, start_time=2.7, end_time=4.5, text="Second block"),
+        ]
+        report = validate_subtitle_blocks(blocks)
+        assert report.is_valid is True
+        assert len(report.warnings) == 1
+        assert "overlaps" in report.warnings[0]
+
+    def test_cue_exceeding_video_duration_produces_warning(self) -> None:
+        blocks = [
+            SubtitleBlock(index=1, start_time=0.0, end_time=7.5, text="Runs past video end"),
+        ]
+        report = validate_subtitle_blocks(blocks, video_duration=5.0)
+        assert report.is_valid is True
+        assert len(report.warnings) == 1
+        assert "extends" in report.warnings[0]

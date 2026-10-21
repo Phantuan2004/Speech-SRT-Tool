@@ -1,17 +1,19 @@
 # Speech SRT Tool - Dependencies
-# Milestone 1: Environment, Architecture & Testing Foundations
+# Milestone 1 & 2: Environment, ASR Engine & Subtitle Processing
 
 # ==========================================
-# Core Dependencies (Milestone 1)
+# Core Dependencies
 # ==========================================
 PySide6>=6.5.0
 pytest>=8.0.0
 
+# Speech Recognition Engine (Milestone 2)
+faster-whisper>=1.0.0
+ctranslate2>=4.0.0
+numpy>=1.24.0
+av<14
+
 # ==========================================
-# Optional / Planned Future Dependencies
+# Optional / Future Dependencies
 # ==========================================
-# (These will be installed when implementing their respective milestones)
-# Milestone 2 & 3: Audio Processing & Offline Speech Recognition
-# faster-whisper>=1.0.0
-# ctranslate2>=4.0.0
-# numpy>=1.24.0
+# torch / torchvision (for GPU CUDA environments with NVIDIA hardware)

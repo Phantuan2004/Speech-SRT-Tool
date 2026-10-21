@@ -104,13 +104,37 @@ python app.py
 
 ---
 
-## 7. Cấu trúc Thư mục Dự án
+## 7. Hướng dẫn Sử dụng CLI Pipeline (Speech Recognition & SRT Export)
+
+Công cụ hỗ trợ giao diện dòng lệnh (CLI) tốc độ cao, cho phép nhận diện và xuất phụ đề tự động:
+
+### Lệnh chạy cơ bản:
+```powershell
+python -m speech_srt.cli --input "duong_dan_video.mp4" --output "output/subtitles.srt" --model small.en --device auto
+```
+
+### Các tùy chọn tham số:
+| Tham số | Mặc định | Ý nghĩa |
+| :--- | :--- | :--- |
+| `-i, --input` | *(Bắt buộc)* | Đường dẫn file video hoặc audio nguồn (`.mp4`, `.mkv`, `.mov`, `.wav`, v.v.) |
+| `-o, --output` | `output/<tên>.srt` | Đường dẫn file phụ đề `.srt` xuất ra |
+| `-m, --model` | `small.en` | Kích thước mô hình Whisper (`tiny.en`, `base.en`, `small.en`, `medium.en`) |
+| `-d, --device` | `auto` | Thiết bị xử lý: `auto` (ưu tiên CUDA nếu có, fallback an toàn sang `cpu`), `cpu`, hoặc `cuda` |
+| `--compute-type` | `auto` | Định dạng lượng tử hóa (`int8` cho CPU, `float16` cho CUDA) |
+| `--beam-size` | `5` | Độ rộng chùm giải mã (Beam search width) |
+| `--vad / --no-vad` | `True` | Bật/tắt bộ lọc giọng nói Silero VAD để lọc khoảng lặng |
+| `--offline` | `False` | Bật chế độ offline nghiêm ngặt (chỉ dùng model đã có trong cache) |
+| `--max-line-length` | `42` | Số ký tự tối đa trên mỗi dòng phụ đề (chuẩn hiển thị CapCut) |
+
+---
+
+## 8. Cấu trúc Thư mục Dự án
 
 ```text
 Speech SRT Tool/
 ├── app.py                         # Application entrypoint bootstrap
 ├── pyproject.toml                 # Package metadata & pytest configuration
-├── requirements.txt               # Project dependencies
+├── requirements.txt               # Project dependencies (PySide6, faster-whisper, av<14, pytest)
 ├── README.md                      # Hướng dẫn cài đặt & vận hành
 ├── .gitignore                     # Git ignore rules cho Python, media & models
 ├── AGENTS.md                      # Nguyên tắc kiến trúc & quy chuẩn kỹ thuật
@@ -119,15 +143,16 @@ Speech SRT Tool/
 ├── src/
 │   └── speech_srt/
 │       ├── __init__.py            # Package root & metadata (v0.1.0)
+│       ├── cli.py                 # CLI dispatcher chạy pipeline nhận diện & xuất SRT
 │       ├── config.py              # Typed configuration loader & validator
 │       ├── media_info.py          # FFprobe wrapper lấy metadata video/audio
-│       ├── audio_extractor.py     # FFmpeg wrapper trích xuất 16kHz mono WAV
-│       ├── asr_engine.py          # Offline ASR engine interface & dataclasses
+│       ├── audio_extractor.py     # FFmpeg wrapper trích xuất 16kHz mono WAV an toàn
+│       ├── asr_engine.py          # Faster-Whisper offline ASR engine (lazy loading)
 │       ├── word_aligner.py        # Căn chỉnh timestamp cấp độ từ
-│       ├── sentence_segmenter.py  # Cắt câu tự nhiên theo giới hạn dòng/ký tự
-│       ├── srt_writer.py          # Bộ sinh SRT chuẩn mili-giây CapCut
-│       ├── validators.py          # Bộ kiểm tra tính hợp lệ media & timestamp
-│       ├── pipeline.py            # Pipeline điều phối toàn diện
+│       ├── sentence_segmenter.py  # Cắt câu tự nhiên theo dấu câu, khoảng lặng & CapCut
+│       ├── srt_writer.py          # Bộ ghi SRT nguyên tử (atomic) & parser kiểm tra
+│       ├── validators.py          # Bộ kiểm tra tính hợp lệ media & subtitle cues
+│       ├── pipeline.py            # Pipeline điều phối xử lý toàn diện không phụ thuộc GUI
 │       └── ui/                    # Giao diện PySide6
 │           ├── __init__.py
 │           ├── main_window.py     # Cửa sổ chính
@@ -136,10 +161,13 @@ Speech SRT Tool/
 │           └── workers.py         # QThread workers xử lý ngầm không block GUI
 ├── tests/
 │   ├── fixtures/                  # Test sample files
-│   ├── test_srt_writer.py         # Kiểm thử format SRT & mili-giây
-│   ├── test_validators.py         # Kiểm thử validation input/output
-│   ├── test_sentence_segmenter.py # Kiểm thử ngắt câu
-│   └── test_pipeline.py           # Kiểm thử pipeline baseline
+│   ├── test_media_info.py         # Kiểm thử FFprobe media metadata & bắt lỗi no-audio
+│   ├── test_audio_extractor.py    # Kiểm thử trích xuất 16kHz WAV & dọn dẹp file tạm
+│   ├── test_asr_engine.py         # Kiểm thử ASR lazy loading, device resolution & offline
+│   ├── test_sentence_segmenter.py # Kiểm thử ngắt câu theo dấu câu, ngắt dòng & fallback
+│   ├── test_srt_writer.py         # Kiểm thử format SRT, parse_srt roundtrip & atomic write
+│   ├── test_validators.py         # Kiểm thử validation input, bounds, overlap & duration
+│   └── test_pipeline.py           # Kiểm thử pipeline integration
 ├── scripts/
 │   └── check_environment.py       # Script kiểm tra chẩn đoán môi trường
 ├── output/                        # Thư mục xuất file SRT mặc định
@@ -148,11 +176,11 @@ Speech SRT Tool/
 
 ---
 
-## 8. Lộ trình Triển khai (Milestones)
+## 9. Lộ trình Triển khai (Milestones)
 
 - [x] **Milestone 1**: Project Foundation & Environment Validation *(Hoàn thành)*.
-- [ ] **Milestone 2**: Media Inspection & Audio Extraction (FFmpeg/FFprobe).
-- [ ] **Milestone 3**: Offline ASR Engine & Word Alignment (Faster-Whisper).
-- [ ] **Milestone 4**: Sentence Segmentation & CapCut SRT Generator.
-- [ ] **Milestone 5**: PySide6 Desktop GUI & Worker Threads.
+- [x] **Milestone 2**: Media Inspection & Audio Extraction (FFmpeg/FFprobe) *(Hoàn thành)*.
+- [x] **Milestone 3**: Offline ASR Engine & Word Alignment (Faster-Whisper) *(Hoàn thành)*.
+- [x] **Milestone 4**: Sentence Segmentation & CapCut SRT Generator *(Hoàn thành)*.
+- [ ] **Milestone 5**: PySide6 Desktop GUI & Worker Threads *(Kế tiếp)*.
 - [ ] **Milestone 6**: Quality Benchmark (±200 ms trên 95% mốc), Error Handling & Windows Packaging.

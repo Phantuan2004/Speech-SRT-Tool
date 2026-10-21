@@ -1,15 +1,16 @@
 """
 Validation Utilities Module.
 
-Validates input files, timestamp coherence, duration bounds, and SRT syntax.
-Ensures zero data corruption and detects invalid inputs before processing.
+Validates input files, timestamp coherence, duration bounds, and SRT cues.
+Returns structured error and warning reports without destructive auto-modifications.
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Sequence, Set, Tuple
+from typing import List, Optional, Sequence, Set, Tuple
 from speech_srt.sentence_segmenter import SubtitleBlock
 
 SUPPORTED_VIDEO_EXTENSIONS: Set[str] = {
@@ -20,10 +21,20 @@ SUPPORTED_AUDIO_EXTENSIONS: Set[str] = {
 }
 SUPPORTED_EXTENSIONS: Set[str] = SUPPORTED_VIDEO_EXTENSIONS | SUPPORTED_AUDIO_EXTENSIONS
 
-# Regex for strict SRT timestamp line: 00:00:00,000 --> 00:00:00,000
-SRT_TIMESTAMP_REGEX = re.compile(
-    r"^\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*$"
-)
+
+@dataclass
+class ValidationReport:
+    """Detailed summary of validation errors and warnings."""
+    is_valid: bool
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+    def add_error(self, message: str) -> None:
+        self.errors.append(message)
+        self.is_valid = False
+
+    def add_warning(self, message: str) -> None:
+        self.warnings.append(message)
 
 
 def validate_media_file(path: Path) -> Tuple[bool, str]:
@@ -64,54 +75,106 @@ def validate_timestamps(
     max_duration: Optional[float] = None,
 ) -> Tuple[bool, str]:
     """
-    Validate that start and end timestamps form a valid, non-negative, forward-progressing interval.
+    Validate that start and end timestamps form a valid, non-negative interval.
 
     Args:
         start_time: Interval start in seconds.
         end_time: Interval end in seconds.
-        max_duration: Optional upper bound for end_time (e.g. media duration).
+        max_duration: Optional media duration bound.
 
     Returns:
         Tuple of (is_valid: bool, error_message: str).
     """
     if start_time < 0.0:
-        return False, f"Start time cannot be negative: {start_time}"
+        return False, f"Start time cannot be negative: {start_time:.3f}s"
 
     if end_time < 0.0:
-        return False, f"End time cannot be negative: {end_time}"
+        return False, f"End time cannot be negative: {end_time:.3f}s"
 
     if end_time <= start_time:
-        return False, f"End time ({end_time}s) must be strictly greater than start time ({start_time}s)"
+        return False, f"End time ({end_time:.3f}s) must be strictly greater than start time ({start_time:.3f}s)"
 
     if max_duration is not None and end_time > max_duration + 0.5:
-        return False, f"End time ({end_time}s) exceeds media duration ({max_duration}s)"
+        return False, f"End time ({end_time:.3f}s) exceeds media duration ({max_duration:.3f}s)"
 
     return True, "Valid timestamp range"
 
 
-def validate_subtitle_blocks(blocks: Sequence[SubtitleBlock]) -> Tuple[bool, str]:
+def validate_subtitle_blocks(
+    blocks: Sequence[SubtitleBlock],
+    video_duration: Optional[float] = None,
+) -> ValidationReport:
     """
-    Validate an ordered sequence of SubtitleBlock items.
-    Checks for index continuity, valid timestamps, and non-empty text.
+    Perform deep validation of subtitle cues:
+    - Empty cue text
+    - Negative timestamps or start >= end
+    - Chronological progression order
+    - Abnormal overlaps between consecutive cues
+    - Cues exceeding media duration
 
     Args:
         blocks: Sequence of SubtitleBlock instances.
+        video_duration: Optional duration of media in seconds.
 
     Returns:
-        Tuple of (is_valid: bool, error_message: str).
+        ValidationReport instance.
     """
+    report = ValidationReport(is_valid=True)
+
     if not blocks:
-        return True, "Empty subtitle sequence"
+        if video_duration and video_duration > 1.0:
+            report.add_warning(
+                f"Generated subtitle list is empty, but media duration is {video_duration:.1f}s."
+            )
+        return report
+
+    prev_end = 0.0
+    prev_start = -1.0
 
     for idx, block in enumerate(blocks, start=1):
+        # Index continuity
         if block.index != idx:
-            return False, f"Subtitle block index mismatch: expected {idx}, got {block.index}"
+            report.add_error(f"Cue index mismatch at position {idx}: expected {idx}, got {block.index}")
 
-        is_valid, err = validate_timestamps(block.start_time, block.end_time)
-        if not is_valid:
-            return False, f"Block #{idx} timestamp error: {err}"
-
+        # Empty text check
         if not block.text.strip():
-            return False, f"Block #{idx} has empty text"
+            report.add_error(f"Cue #{idx} contains empty text (start: {block.start_time:.3f}s)")
 
-    return True, "All subtitle blocks are valid"
+        # Timestamp bounds
+        if block.start_time < 0.0:
+            report.add_error(f"Cue #{idx} has negative start time: {block.start_time:.3f}s")
+
+        if block.end_time < 0.0:
+            report.add_error(f"Cue #{idx} has negative end time: {block.end_time:.3f}s")
+
+        if block.end_time <= block.start_time:
+            report.add_error(
+                f"Cue #{idx} has zero or negative duration: {block.start_time:.3f}s --> {block.end_time:.3f}s"
+            )
+
+        # Chronological progression
+        if idx > 1 and block.start_time < prev_start:
+            report.add_error(
+                f"Cue #{idx} starts earlier than preceding cue #{idx-1}: "
+                f"({block.start_time:.3f}s < {prev_start:.3f}s)"
+            )
+
+        # Overlap check
+        if idx > 1 and block.start_time < prev_end - 0.05:
+            overlap = prev_end - block.start_time
+            report.add_warning(
+                f"Cue #{idx} overlaps with cue #{idx-1} by {overlap:.3f}s "
+                f"(Cue #{idx-1} ends at {prev_end:.3f}s, Cue #{idx} starts at {block.start_time:.3f}s)"
+            )
+
+        # Media duration bound
+        if video_duration is not None and block.end_time > video_duration + 0.5:
+            overhang = block.end_time - video_duration
+            report.add_warning(
+                f"Cue #{idx} extends {overhang:.2f}s beyond media duration ({video_duration:.2f}s)"
+            )
+
+        prev_start = block.start_time
+        prev_end = block.end_time
+
+    return report

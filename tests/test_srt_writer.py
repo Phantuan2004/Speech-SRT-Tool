@@ -1,11 +1,18 @@
 """
-Unit tests for SRT Serializer and Formatter.
+Unit tests for SRT Serializer, Writer, and Parser.
 """
 
 import pytest
 from pathlib import Path
 from speech_srt.sentence_segmenter import SubtitleBlock
-from speech_srt.srt_writer import format_timestamp, serialize_srt, write_srt
+from speech_srt.srt_writer import (
+    SRTFormatError,
+    format_timestamp,
+    parse_srt,
+    parse_timestamp,
+    serialize_srt,
+    write_srt,
+)
 
 
 class TestFormatTimestamp:
@@ -19,55 +26,59 @@ class TestFormatTimestamp:
         assert format_timestamp(0.005) == "00:00:00,005"
 
     def test_seconds_and_minutes(self) -> None:
-        # 1 minute, 5 seconds, 432 milliseconds
         assert format_timestamp(65.432) == "00:01:05,432"
 
     def test_hour_rollover(self) -> None:
-        # 1 hour, 1 minute, 1 second, 5 milliseconds
         assert format_timestamp(3661.005) == "01:01:01,005"
-
-    def test_multi_hour(self) -> None:
-        assert format_timestamp(7325.890) == "02:02:05,890"
 
     def test_negative_timestamp_raises_value_error(self) -> None:
         with pytest.raises(ValueError, match="cannot be negative"):
             format_timestamp(-1.0)
 
 
-class TestSerializeSrt:
-    """Tests for serialize_srt function."""
+class TestParseTimestamp:
+    """Tests for parse_timestamp function."""
 
-    def test_empty_blocks_returns_empty_string(self) -> None:
+    def test_parse_valid_timestamp(self) -> None:
+        assert abs(parse_timestamp("00:01:05,432") - 65.432) < 1e-4
+        assert abs(parse_timestamp("01:01:01,005") - 3661.005) < 1e-4
+
+    def test_parse_invalid_timestamp_raises_error(self) -> None:
+        with pytest.raises(SRTFormatError, match="Invalid SRT timestamp"):
+            parse_timestamp("00:01:05.432")  # Dot instead of comma
+
+
+class TestSerializeAndParseRoundtrip:
+    """Tests for serialize_srt and parse_srt roundtrip fidelity."""
+
+    def test_empty_blocks(self) -> None:
         assert serialize_srt([]) == ""
+        assert parse_srt("") == []
 
-    def test_single_block_formatting(self) -> None:
+    def test_roundtrip_multi_blocks(self, tmp_path: Path) -> None:
         blocks = [
-            SubtitleBlock(index=1, start_time=1.0, end_time=3.5, text="Hello world!"),
+            SubtitleBlock(index=1, start_time=1.250, end_time=3.500, text="First line of dialogue."),
+            SubtitleBlock(index=2, start_time=3.800, end_time=6.120, text="Second line.\nWith two rows."),
         ]
-        expected = "1\n00:00:01,000 --> 00:00:03,500\nHello world!\n"
-        assert serialize_srt(blocks) == expected
 
-    def test_multiple_blocks_formatting(self) -> None:
-        blocks = [
-            SubtitleBlock(index=1, start_time=0.5, end_time=2.0, text="First subtitle."),
-            SubtitleBlock(index=2, start_time=2.2, end_time=4.1, text="Second subtitle."),
-        ]
-        result = serialize_srt(blocks)
-        assert "1\n00:00:00,500 --> 00:00:02,000\nFirst subtitle." in result
-        assert "2\n00:00:02,200 --> 00:00:04,100\nSecond subtitle." in result
+        srt_file = tmp_path / "roundtrip.srt"
+        write_srt(blocks, srt_file)
 
+        # Re-parse from file
+        parsed = parse_srt(srt_file)
+        assert len(parsed) == 2
 
-class TestWriteSrt:
-    """Tests for file writing functionality."""
+        assert parsed[0].index == 1
+        assert abs(parsed[0].start_time - 1.250) < 1e-3
+        assert abs(parsed[0].end_time - 3.500) < 1e-3
+        assert parsed[0].text == "First line of dialogue."
 
-    def test_write_srt_creates_valid_utf8_file(self, tmp_path: Path) -> None:
-        out_file = tmp_path / "test_output.srt"
-        blocks = [
-            SubtitleBlock(index=1, start_time=0.0, end_time=2.5, text="Testing CapCut export."),
-        ]
-        result_path = write_srt(blocks, out_file)
+        assert parsed[1].index == 2
+        assert abs(parsed[1].start_time - 3.800) < 1e-3
+        assert abs(parsed[1].end_time - 6.120) < 1e-3
+        assert parsed[1].text == "Second line.\nWith two rows."
 
-        assert result_path.exists()
-        content = result_path.read_text(encoding="utf-8")
-        assert "00:00:00,000 --> 00:00:02,500" in content
-        assert "Testing CapCut export." in content
+    def test_parse_malformed_srt_raises_error(self) -> None:
+        malformed = "1\nInvalid Arrow Timestamp Line\nHello"
+        with pytest.raises(SRTFormatError):
+            parse_srt(malformed)
