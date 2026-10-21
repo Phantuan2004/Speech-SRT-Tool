@@ -1,0 +1,30 @@
+{
+  "app_name": "Speech SRT Tool",
+  "version": "0.1.0",
+  "target_language": "en",
+  "asr": {
+    "engine": "faster-whisper",
+    "model_size": "base.en",
+    "device": "cpu",
+    "compute_type": "int8",
+    "offline_mode": true
+  },
+  "subtitles": {
+    "format": "srt",
+    "capcut_compatible": true,
+    "max_line_length": 42,
+    "max_lines_per_subtitle": 2,
+    "target_accuracy_tolerance_ms": 200,
+    "target_accuracy_percentage": 95.0
+  },
+  "audio_extraction": {
+    "sample_rate": 16000,
+    "channels": 1,
+    "codec": "pcm_s16le",
+    "format": "wav"
+  },
+  "storage": {
+    "output_dir": "output",
+    "log_dir": "logs"
+  }
+}

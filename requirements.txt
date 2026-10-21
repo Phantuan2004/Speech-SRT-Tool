@@ -1,0 +1,17 @@
+# Speech SRT Tool - Dependencies
+# Milestone 1: Environment, Architecture & Testing Foundations
+
+# ==========================================
+# Core Dependencies (Milestone 1)
+# ==========================================
+PySide6>=6.5.0
+pytest>=8.0.0
+
+# ==========================================
+# Optional / Planned Future Dependencies
+# ==========================================
+# (These will be installed when implementing their respective milestones)
+# Milestone 2 & 3: Audio Processing & Offline Speech Recognition
+# faster-whisper>=1.0.0
+# ctranslate2>=4.0.0
+# numpy>=1.24.0
