@@ -1,0 +1,31 @@
+{
+  "$schema": "benchmark_ground_truth_v1",
+  "description": "Ground-truth reference format for timestamp accuracy benchmarks. Each entry represents a single video/audio sample with reference transcription and per-sentence timing boundaries.",
+  "entries": [
+    {
+      "video_file": "sample_video.mp4",
+      "audio_file": null,
+      "language": "en",
+      "duration_seconds": 300.0,
+      "notes": "Optional description or recording conditions",
+      "reference_sentences": [
+        {
+          "id": 1,
+          "text": "This is an example reference sentence.",
+          "start_time": 1.200,
+          "end_time": 3.850,
+          "difficulty": "normal",
+          "notes": ""
+        },
+        {
+          "id": 2,
+          "text": "Background noise may affect recognition.",
+          "start_time": 4.100,
+          "end_time": 7.300,
+          "difficulty": "noisy",
+          "notes": "Crowd noise in background"
+        }
+      ]
+    }
+  ]
+}

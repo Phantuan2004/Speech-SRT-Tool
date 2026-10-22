@@ -6,9 +6,10 @@ Coordinates the end-to-end subtitle generation process:
 2. FFprobe media inspection & audio stream verification
 3. FFmpeg audio extraction (16kHz mono WAV)
 4. Offline ASR transcription with word-level timestamps (faster-whisper)
-5. Sentence segmentation & CapCut layout wrapping
-6. Validation checks (chronology, duration, overlaps)
-7. Atomic UTF-8 SRT writing and verification
+5. Word-level timestamp refinement (monotonic, overlap, gap smoothing)
+6. Sentence segmentation & CapCut layout wrapping
+7. Validation checks (chronology, duration, overlaps)
+8. Atomic UTF-8 SRT writing and verification
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from speech_srt.validators import (
     validate_media_file,
     validate_subtitle_blocks,
 )
+from speech_srt.word_aligner import refine_segments
 
 logger = logging.getLogger(__name__)
 
@@ -173,15 +175,19 @@ class TranscriptionPipeline:
                 error_message=f"Processing failed during extraction or transcription: {exc}",
             )
 
-        # 6. Sentence Segmentation & CapCut layout wrapping
+        # 6. Refine word-level timestamps (monotonic, overlap, gap smoothing)
+        update_progress(75.0, "Refining word-level timestamp alignment...")
+        refined_segments = refine_segments(asr_result.segments)
+
+        # 7. Sentence Segmentation & CapCut layout wrapping
         update_progress(80.0, "Segmenting transcription into natural sentence cues...")
         cues = segment_transcription_result(
-            result=asr_result.segments,
+            result=refined_segments,
             max_line_length=self.config.subtitles.max_line_length,
             max_lines_per_subtitle=self.config.subtitles.max_lines_per_subtitle,
         )
 
-        # 7. Validate generated subtitle blocks
+        # 8. Validate generated subtitle blocks
         update_progress(90.0, "Validating subtitle timestamps and continuity...")
         val_report: ValidationReport = validate_subtitle_blocks(
             blocks=cues,
@@ -200,7 +206,7 @@ class TranscriptionPipeline:
                 error_message=f"Subtitle validation failed: {error_details}",
             )
 
-        # 8. Export atomic SRT
+        # 9. Export atomic SRT
         update_progress(95.0, f"Writing CapCut-compliant SRT to '{target_srt.name}'...")
         try:
             write_srt(cues, target_srt)
